@@ -774,7 +774,7 @@ impl Browser {
             self.close_child_preview();
             return;
         };
-        if self.is_open_child(depth, &location) {
+        if self.is_open_child(depth, &location) && self.state.borrow().columns.len() == depth + 2 {
             return;
         }
         let request_id = self.new_request_id();
@@ -815,12 +815,7 @@ impl Browser {
         if !self.state.borrow_mut().enter_preview(depth) {
             return false;
         }
-        let position = self
-            .state
-            .borrow()
-            .columns
-            .get(depth)
-            .and_then(|column| column.selected);
+        let position = self.entered_column_position(depth);
         self.emit(BrowserEvent::FocusChanged { depth, position });
         true
     }
@@ -861,6 +856,15 @@ impl Browser {
     }
 
     pub(crate) fn navigate_with_selection(self: &Rc<Self>, location: Location, select_first: bool) {
+        self.navigate_selecting(location, select_first, None);
+    }
+
+    fn navigate_selecting(
+        self: &Rc<Self>,
+        location: Location,
+        select_first: bool,
+        select_on_load: Option<Location>,
+    ) {
         self.bump_navigation_generation();
         if self.active_location().as_ref() == Some(&location) {
             return;
@@ -883,7 +887,11 @@ impl Browser {
             .borrow_mut()
             .navigate_path(path, loads.iter().map(|(_, request_id)| *request_id));
         let active_depth = loads.len() - 1;
-        if select_first {
+        if let Some(target) = select_on_load {
+            self.state
+                .borrow_mut()
+                .select_location_on_load(active_depth, target);
+        } else if select_first {
             self.select_first_on_load(active_depth);
         }
         self.emit(BrowserEvent::Reset);
@@ -2084,7 +2092,19 @@ impl Browser {
         }
     }
 
-    pub fn focus_parent(&self) {
+    pub fn focus_parent(self: &Rc<Self>) {
+        // Fixed slots hold only the parent, the current folder and its preview,
+        // so moving left is a move up a level rather than a focus change.
+        if self.shifting_columns.get()
+            && let Some(depth) = self.active_depth()
+            && let Some(parent) = depth
+                .checked_sub(1)
+                .and_then(|parent| self.location_at(parent))
+            && let Some(current) = self.active_location()
+        {
+            self.navigate_selecting(parent, false, Some(current));
+            return;
+        }
         let focus = self.state.borrow_mut().focus_parent();
         if let Some((depth, position)) = focus {
             self.emit(BrowserEvent::FocusChanged { depth, position });
@@ -2099,9 +2119,20 @@ impl Browser {
             return;
         }
         let focus = self.state.borrow_mut().focus_child();
-        if let Some((depth, position)) = focus {
+        if let Some((depth, _)) = focus {
+            let position = self.entered_column_position(depth);
             self.emit(BrowserEvent::FocusChanged { depth, position });
         }
+    }
+
+    /// Moving into a column lands on its first row, so one key press both enters
+    /// the column and selects in it.
+    fn entered_column_position(&self, depth: usize) -> Option<usize> {
+        let mut state = self.state.borrow_mut();
+        if self.shifting_columns.get() {
+            return state.select_first_visible(depth);
+        }
+        state.columns.get(depth).and_then(|column| column.selected)
     }
 
     pub fn enter_focused_directory(self: &Rc<Self>) {

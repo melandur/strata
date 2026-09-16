@@ -215,16 +215,15 @@ impl NavigationState {
         self.active_column = self.columns.len().checked_sub(1);
     }
 
-    /// Columns the user is actually browsing. A preview only sits beside the
-    /// active column, so focusing one makes it part of the browsed path.
+    /// Columns the user is actually browsing. Previews only ever sit past the
+    /// active column, so everything up to it is the browsed path.
     pub fn browsed_len(&self) -> usize {
-        let previews = self
-            .columns
-            .iter()
-            .rev()
-            .take_while(|column| column.preview)
-            .count();
-        (self.columns.len() - previews).max(self.active_column.map_or(0, |depth| depth + 1))
+        if !self.columns.iter().any(|column| column.preview) {
+            return self.columns.len();
+        }
+        self.active_column
+            .map_or(0, |depth| depth + 1)
+            .min(self.columns.len())
     }
 
     pub fn is_preview_column(&self, depth: usize) -> bool {
@@ -245,8 +244,35 @@ impl NavigationState {
         self.peek = None;
         self.columns.truncate(parent_depth + 1);
         self.push_column_kind(location, request_id, true);
+        // Land on a row as soon as the preview loads, so entering it takes one
+        // key press rather than one to enter and another to select.
+        self.select_first_on_load(parent_depth + 1);
         self.active_column = Some(parent_depth);
         true
+    }
+
+    /// Selects `location` once the column's entries arrive.
+    pub fn select_location_on_load(&mut self, depth: usize, location: Location) {
+        if let Some(column) = self.columns.get_mut(depth) {
+            column.select_first_on_load = false;
+            column.selection_anchor = Some(location.clone());
+            column.selection_target = Some(location.clone());
+            column.pending_selection = HashSet::from([location]);
+        }
+    }
+
+    /// Selects the column's first visible row when nothing is selected yet.
+    pub fn select_first_visible(&mut self, depth: usize) -> Option<usize> {
+        let column = self.columns.get(depth)?;
+        if column.selected.is_some() {
+            return column.selected;
+        }
+        let show_hidden = column.preferences.show_hidden;
+        let position = column
+            .entries
+            .iter()
+            .position(|entry| show_hidden || !entry.is_hidden)?;
+        self.select(depth, position).then_some(position)
     }
 
     /// Turns previews up to and including `depth` into browsed columns, so

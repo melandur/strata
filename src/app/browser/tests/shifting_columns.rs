@@ -46,6 +46,28 @@ fn the_preview_shows_the_focused_folder_without_entering_it() {
 }
 
 #[test]
+fn the_preview_arrives_with_its_first_row_selected() {
+    let browser = shifting_browser();
+    browser.select(1, 0);
+
+    browser.sync_child_preview();
+
+    assert_eq!(browser.selected_positions(2), vec![0]);
+}
+
+#[test]
+fn entering_a_column_lands_on_its_first_row() {
+    let browser = shifting_browser();
+    browser.select(1, 0);
+    browser.sync_child_preview();
+
+    browser.activate_focused();
+
+    assert_eq!(browser.active_depth(), Some(2));
+    assert_eq!(browser.selected_positions(2), vec![0]);
+}
+
+#[test]
 fn entering_the_preview_records_navigation() {
     let browser = shifting_browser();
     browser.select(1, 0);
@@ -62,16 +84,39 @@ fn entering_the_preview_records_navigation() {
 }
 
 #[test]
-fn leaving_the_entered_preview_returns_to_the_folder_beside_it() {
+fn moving_left_goes_up_a_level_and_keeps_a_parent_beside_it() {
     let browser = shifting_browser();
     browser.select(1, 0);
     browser.sync_child_preview();
     browser.activate_focused();
     browser.sync_child_preview();
 
-    browser.escape();
+    browser.focus_parent();
 
     assert_eq!(browser.active_location(), Some(Location::local("/fixture")));
+    assert_eq!(browser.location_at(0), Some(Location::local("/")));
+    assert_eq!(
+        browser
+            .selected_entries()
+            .first()
+            .map(|entry| &entry.location),
+        Some(&Location::local("/fixture/child"))
+    );
+}
+
+#[test]
+fn the_preview_stays_out_of_the_path_after_entering_and_leaving() {
+    let browser = shifting_browser();
+    browser.select(1, 0);
+    browser.sync_child_preview();
+    browser.activate_focused();
+    browser.sync_child_preview();
+
+    browser.focus_parent();
+    browser.sync_child_preview();
+
+    assert_eq!(browser.active_depth(), Some(1));
+    assert_eq!(browser.location_at(3), None);
 }
 
 #[test]
