@@ -80,7 +80,11 @@ impl ViewState {
 
     pub(in crate::ui) fn viewport_width(&self) -> i32 {
         let page = self.scroller.hadjustment().page_size().round() as i32;
-        let page = if page > 0 { page } else { self.scroller.width() };
+        let page = if page > 0 {
+            page
+        } else {
+            self.scroller.width()
+        };
         page - self.columns_widget.margin_end()
     }
 
@@ -95,7 +99,10 @@ impl ViewState {
                 let first = columns.len().saturating_sub(VIEWPORT_SLOTS);
                 let visible = columns.len() - first;
                 let has_child = self.browser.active_depth().is_some_and(|active| {
-                    columns.len().checked_sub(1).is_some_and(|last| active < last)
+                    columns
+                        .len()
+                        .checked_sub(1)
+                        .is_some_and(|last| active < last)
                 });
                 slot_widths(self.viewport_width(), &slot_ratios(visible, has_child))
                     .map(|widths| (first, widths))
@@ -113,7 +120,8 @@ impl ViewState {
         };
 
         self.columns_widget.set_halign(gtk::Align::Fill);
-        self.scroller.set_hscrollbar_policy(gtk::PolicyType::External);
+        self.scroller
+            .set_hscrollbar_policy(gtk::PolicyType::External);
         for (index, column) in columns.iter().enumerate() {
             let Some(width) = index.checked_sub(first).and_then(|slot| widths.get(slot)) else {
                 column.shell.set_visible(false);
@@ -141,6 +149,7 @@ impl ViewState {
         if self.yazi_columns.replace(enabled) == enabled {
             return;
         }
+        self.browser.set_shifting_columns(enabled);
         self.sync_column_viewport();
         let deepest = self
             .columns

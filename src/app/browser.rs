@@ -538,6 +538,9 @@ pub struct Browser {
     pending_sort: Cell<Option<(u64, usize)>>,
     preferences: Cell<ViewPreferences>,
     chooser_mode: Cell<bool>,
+    /// Fixed-slot columns: the focused folder is shown beside the active column
+    /// instead of appending one column per level.
+    shifting_columns: Cell<bool>,
     observers: RefCell<Vec<Observer>>,
     preferences_observers: RefCell<Vec<PreferencesObserver>>,
 }
@@ -589,6 +592,7 @@ impl Browser {
             pending_sort: Cell::new(None),
             preferences: Cell::new(preferences),
             chooser_mode: Cell::new(false),
+            shifting_columns: Cell::new(false),
             observers: RefCell::new(Vec::new()),
             preferences_observers: RefCell::new(Vec::new()),
         })
@@ -740,6 +744,87 @@ impl Browser {
         self.state.borrow_mut().focus_column(depth);
     }
 
+    pub fn set_shifting_columns(self: &Rc<Self>, enabled: bool) {
+        if self.shifting_columns.replace(enabled) == enabled {
+            return;
+        }
+        if enabled {
+            self.sync_child_preview();
+        } else {
+            self.close_child_preview();
+        }
+    }
+
+    /// Opens, replaces, or closes the preview beside the active column so it
+    /// always shows the focused folder. No-op unless fixed slots are enabled.
+    pub fn sync_child_preview(self: &Rc<Self>) {
+        if !self.shifting_columns.get() || self.is_chooser_mode() {
+            return;
+        }
+        let Some(depth) = self.active_depth() else {
+            return;
+        };
+        let focused = self
+            .state
+            .borrow()
+            .focused_entry()
+            .filter(|(_, _, entry)| entry.is_directory())
+            .map(|(_, _, entry)| entry.location);
+        let Some(location) = focused else {
+            self.close_child_preview();
+            return;
+        };
+        if self.is_open_child(depth, &location) {
+            return;
+        }
+        let request_id = self.new_request_id();
+        if !self
+            .state
+            .borrow_mut()
+            .open_preview(depth, location.clone(), request_id)
+        {
+            return;
+        }
+        let retained = depth + 1;
+        self.loads.borrow_mut().truncate(retained);
+        self.monitors.borrow_mut().truncate(retained);
+        self.truncate_deferred_from(retained);
+        self.emit(BrowserEvent::ColumnsTruncated { len: retained });
+        self.emit(BrowserEvent::ColumnAdded {
+            depth: retained,
+            location: location.clone(),
+        });
+        self.start_load(retained, location, request_id);
+    }
+
+    fn close_child_preview(self: &Rc<Self>) {
+        let browsed = self.state.borrow().browsed_len();
+        if browsed == 0 || browsed >= self.state.borrow().columns.len() {
+            return;
+        }
+        self.state.borrow_mut().columns.truncate(browsed);
+        self.loads.borrow_mut().truncate(browsed);
+        self.monitors.borrow_mut().truncate(browsed);
+        self.truncate_deferred_from(browsed);
+        self.emit(BrowserEvent::ColumnsTruncated { len: browsed });
+    }
+
+    /// Enters the preview beside the active column, recording the navigation
+    /// the same way descending into the folder would.
+    fn enter_child_preview(self: &Rc<Self>, depth: usize) -> bool {
+        if !self.state.borrow_mut().enter_preview(depth) {
+            return false;
+        }
+        let position = self
+            .state
+            .borrow()
+            .columns
+            .get(depth)
+            .and_then(|column| column.selected);
+        self.emit(BrowserEvent::FocusChanged { depth, position });
+        true
+    }
+
     pub fn select_first_on_load(&self, depth: usize) {
         self.state.borrow_mut().select_first_on_load(depth);
     }
@@ -787,23 +872,47 @@ impl Browser {
         self.loads.borrow_mut().clear();
         self.monitors.borrow_mut().clear();
         self.cancel_deferred_work();
-        let request_id = self.new_request_id();
+        let path = self.with_parent_column(NavigationPath::from_locations(vec![location]));
+        let loads: Vec<_> = path
+            .locations()
+            .iter()
+            .cloned()
+            .map(|location| (location, self.new_request_id()))
+            .collect();
         self.state
             .borrow_mut()
-            .navigate(location.clone(), request_id);
+            .navigate_path(path, loads.iter().map(|(_, request_id)| *request_id));
+        let active_depth = loads.len() - 1;
         if select_first {
-            self.select_first_on_load(0);
+            self.select_first_on_load(active_depth);
         }
         self.emit(BrowserEvent::Reset);
-        self.emit(BrowserEvent::ColumnAdded {
-            depth: 0,
-            location: location.clone(),
-        });
+        for (depth, (location, request_id)) in loads.into_iter().enumerate() {
+            self.emit(BrowserEvent::ColumnAdded {
+                depth,
+                location: location.clone(),
+            });
+            self.start_load(depth, location, request_id);
+        }
         self.emit(BrowserEvent::FocusChanged {
-            depth: 0,
+            depth: active_depth,
             position: None,
         });
-        self.start_load(0, location, request_id);
+    }
+
+    /// Fixed slots always keep the parent beside the current folder, so a fresh
+    /// location opens with its parent already filling the left slot.
+    fn with_parent_column(&self, path: NavigationPath) -> NavigationPath {
+        if !self.shifting_columns.get() {
+            return path;
+        }
+        let [location] = path.locations() else {
+            return path;
+        };
+        let Some(parent) = location.parent() else {
+            return path;
+        };
+        NavigationPath::from_locations(vec![parent, location.clone()])
     }
 
     pub fn descend(self: &Rc<Self>, parent_depth: usize, location: Location) {
@@ -1827,7 +1936,13 @@ impl Browser {
             return;
         };
         if entry.is_directory() && self.is_open_child(depth, &entry.location) {
-            self.close_column(depth + 1);
+            // A preview is already showing the folder, so reopening it would
+            // only close and reload the same column; enter it instead.
+            if self.shifting_columns.get() {
+                self.focus_child();
+            } else {
+                self.close_column(depth + 1);
+            }
             return;
         }
         self.select(depth, position);
@@ -1976,7 +2091,13 @@ impl Browser {
         }
     }
 
-    fn focus_child(&self) {
+    fn focus_child(self: &Rc<Self>) {
+        let child = self.active_depth().and_then(|depth| depth.checked_add(1));
+        if let Some(child) = child
+            && self.enter_child_preview(child)
+        {
+            return;
+        }
         let focus = self.state.borrow_mut().focus_child();
         if let Some((depth, position)) = focus {
             self.emit(BrowserEvent::FocusChanged { depth, position });
@@ -2005,7 +2126,11 @@ impl Browser {
             if self.is_open_child(depth, &entry.location) {
                 self.focus_child();
             } else {
-                self.descend_with_selection(depth, entry.location, select_first);
+                self.descend_with_selection(
+                    depth,
+                    entry.location,
+                    select_first || self.shifting_columns.get(),
+                );
             }
         } else if self.should_extract_on_activate(&entry) {
             self.emit(BrowserEvent::ExtractRequested { entry });
@@ -2017,6 +2142,7 @@ impl Browser {
     }
 
     fn restore_path(self: &Rc<Self>, path: NavigationPath) {
+        let path = self.with_parent_column(path);
         self.emit(BrowserEvent::NavigationStarting);
         self.close_peek();
         self.loads.borrow_mut().clear();

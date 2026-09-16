@@ -61,6 +61,9 @@ pub struct ColumnState {
     preferences: ViewPreferences,
     request_id: RequestId,
     select_first_on_load: bool,
+    /// Opened to show the focused folder beside the active column rather than by
+    /// navigating into it, so it is not part of the path the user is browsing.
+    preview: bool,
     // Auto-selection must not redirect paste into the first folder.
     load_cursor: Option<Location>,
 }
@@ -111,9 +114,18 @@ impl NavigationState {
         }
     }
 
+    #[cfg(test)]
     pub fn navigate(&mut self, location: Location, request_id: RequestId) {
+        self.navigate_path(NavigationPath::from_locations(vec![location]), [request_id]);
+    }
+
+    pub fn navigate_path(
+        &mut self,
+        path: NavigationPath,
+        request_ids: impl IntoIterator<Item = RequestId>,
+    ) {
         self.record_navigation();
-        self.restore(NavigationPath::from_locations(vec![location]), [request_id]);
+        self.restore(path, request_ids);
     }
 
     pub fn descend(
@@ -197,16 +209,68 @@ impl NavigationState {
                 request_id,
                 select_first_on_load: false,
                 load_cursor: None,
+                preview: false,
             })
             .collect();
         self.active_column = self.columns.len().checked_sub(1);
     }
 
+    /// Columns the user is actually browsing. A preview only sits beside the
+    /// active column, so focusing one makes it part of the browsed path.
+    pub fn browsed_len(&self) -> usize {
+        let previews = self
+            .columns
+            .iter()
+            .rev()
+            .take_while(|column| column.preview)
+            .count();
+        (self.columns.len() - previews).max(self.active_column.map_or(0, |depth| depth + 1))
+    }
+
+    pub fn is_preview_column(&self, depth: usize) -> bool {
+        self.columns.get(depth).is_some_and(|column| column.preview)
+    }
+
+    /// Opens `location` beside `parent_depth` without entering it: the active
+    /// column and the navigation history stay where they are.
+    pub fn open_preview(
+        &mut self,
+        parent_depth: usize,
+        location: Location,
+        request_id: RequestId,
+    ) -> bool {
+        if parent_depth >= self.columns.len() {
+            return false;
+        }
+        self.peek = None;
+        self.columns.truncate(parent_depth + 1);
+        self.push_column_kind(location, request_id, true);
+        self.active_column = Some(parent_depth);
+        true
+    }
+
+    /// Turns previews up to and including `depth` into browsed columns, so
+    /// entering one records navigation exactly like descending into it.
+    pub fn enter_preview(&mut self, depth: usize) -> bool {
+        if !self.is_preview_column(depth) {
+            return false;
+        }
+        self.record_navigation();
+        for column in self.columns.iter_mut().take(depth + 1) {
+            column.preview = false;
+        }
+        self.columns.truncate(depth + 1);
+        self.active_column = Some(depth);
+        true
+    }
+
     pub fn current_path(&self) -> Option<NavigationPath> {
-        (!self.columns.is_empty()).then(|| {
+        let browsed = self.browsed_len();
+        (browsed > 0).then(|| {
             NavigationPath::from_locations(
                 self.columns
                     .iter()
+                    .take(browsed)
                     .map(|column| column.location.clone())
                     .collect(),
             )
@@ -253,6 +317,10 @@ impl NavigationState {
     }
 
     fn push_column(&mut self, location: Location, request_id: RequestId) {
+        self.push_column_kind(location, request_id, false);
+    }
+
+    fn push_column_kind(&mut self, location: Location, request_id: RequestId, preview: bool) {
         self.columns.push(ColumnState {
             preferences: preferences_for_location(self.preferences, &location),
             location,
@@ -269,6 +337,7 @@ impl NavigationState {
             request_id,
             select_first_on_load: false,
             load_cursor: None,
+            preview,
         });
     }
 
@@ -1129,7 +1198,7 @@ impl NavigationState {
     }
 
     pub fn close_deepest(&mut self) -> Option<(usize, Option<usize>)> {
-        let depth = self.columns.len().checked_sub(1)?;
+        let depth = self.browsed_len().checked_sub(1)?;
         self.close_from(depth)
     }
 

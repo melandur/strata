@@ -1599,7 +1599,6 @@ mod search;
 mod viewport;
 
 pub(super) use reveal::ColumnSpan;
-pub(in crate::ui) use viewport::VIEWPORT_SLOTS;
 
 #[cfg(test)]
 mod tests;

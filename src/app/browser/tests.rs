@@ -25,6 +25,7 @@ mod operations;
 mod preferences;
 mod relocation;
 mod selection;
+mod shifting_columns;
 #[path = "sorting/tests.rs"]
 mod staged_sort;
 mod staging;

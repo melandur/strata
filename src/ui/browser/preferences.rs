@@ -36,11 +36,9 @@ impl BrowserView {
             ThemeManager::single_click_previews,
             Self::set_single_click_previews,
         );
-        self.bind_view_preference(
-            manager,
-            ThemeManager::yazi_columns,
-            |view, enabled| view.state.set_yazi_columns(enabled),
-        );
+        self.bind_view_preference(manager, ThemeManager::yazi_columns, |view, enabled| {
+            view.state.set_yazi_columns(enabled)
+        });
         let interactive = self.state.interactive;
         self.bind_view_preference(
             manager,

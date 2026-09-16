@@ -11,7 +11,11 @@ fn the_current_slot_is_the_widest() {
             .enumerate()
             .max_by_key(|(_, ratio)| **ratio)
             .map(|(index, _)| index);
-        assert_eq!(widest, Some(current), "visible {visible}, child {has_child}");
+        assert_eq!(
+            widest,
+            Some(current),
+            "visible {visible}, child {has_child}"
+        );
     }
 }
 

@@ -27,6 +27,32 @@ use std::time::Instant;
 
 impl ViewState {
     pub(super) fn handle(self: &Rc<Self>, event: &BrowserEvent) {
+        self.handle_event(event);
+        // The preview beside the active column follows the focused row, and
+        // opening it re-enters dispatch with its own column events.
+        if self.yazi_columns.get()
+            && !self.syncing_child_preview.get()
+            && matches!(
+                event,
+                BrowserEvent::FocusChanged { .. } | BrowserEvent::SelectionSetChanged { .. }
+            )
+        {
+            self.syncing_child_preview.set(true);
+            let active = self.browser.active_depth();
+            self.browser.sync_child_preview();
+            // A freshly built column is focusable, so GTK can move focus into
+            // the preview; the user is still browsing the column beside it.
+            if self.browser.active_depth() != active
+                && let Some(depth) = active
+            {
+                self.browser.set_active_column(depth);
+                self.browser.focus_active();
+            }
+            self.syncing_child_preview.set(false);
+        }
+    }
+
+    fn handle_event(self: &Rc<Self>, event: &BrowserEvent) {
         if matches!(
             event,
             BrowserEvent::NavigationStarting
@@ -69,7 +95,13 @@ impl ViewState {
                 self.sync_active_location();
             }
             BrowserEvent::ColumnAdded { depth, location } => {
-                self.set_location(location);
+                // A preview column sits beside the active one; it is not where
+                // the user is, so it must not take over the address bar.
+                if self.browser.active_depth() != Some(*depth) {
+                    self.sync_active_location();
+                } else {
+                    self.set_location(location);
+                }
                 if self.mode_views.borrow().mode() == BrowserMode::Columns {
                     self.append_column(*depth, location);
                 }
