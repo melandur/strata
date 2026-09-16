@@ -1437,7 +1437,11 @@ impl ViewState {
         }
         self.refresh_active_path_rows();
         self.sync_column_viewport();
-        animate_column_entry(&column, &animation_generation);
+        // A preview refresh replaces the same slot, so sliding it in on every
+        // step of a held key would be noise rather than motion.
+        if !self.syncing_child_preview.get() {
+            animate_column_entry(&column, &animation_generation);
+        }
         self.reveal_column(shell);
     }
 
@@ -1593,6 +1597,7 @@ impl ViewState {
     }
 }
 
+mod child_preview;
 mod reveal;
 mod rows;
 mod search;

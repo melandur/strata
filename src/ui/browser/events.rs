@@ -28,27 +28,13 @@ use std::time::Instant;
 impl ViewState {
     pub(super) fn handle(self: &Rc<Self>, event: &BrowserEvent) {
         self.handle_event(event);
-        // The preview beside the active column follows the focused row, and
-        // opening it re-enters dispatch with its own column events.
-        if self.yazi_columns.get()
-            && !self.syncing_child_preview.get()
-            && matches!(
-                event,
-                BrowserEvent::FocusChanged { .. } | BrowserEvent::SelectionSetChanged { .. }
-            )
-        {
-            self.syncing_child_preview.set(true);
-            let active = self.browser.active_depth();
-            self.browser.sync_child_preview();
-            // A freshly built column is focusable, so GTK can move focus into
-            // the preview; the user is still browsing the column beside it.
-            if self.browser.active_depth() != active
-                && let Some(depth) = active
-            {
-                self.browser.set_active_column(depth);
-                self.browser.focus_active();
-            }
-            self.syncing_child_preview.set(false);
+        // The preview beside the active column follows the focused row, at a
+        // pace a held navigation key cannot outrun.
+        if matches!(
+            event,
+            BrowserEvent::FocusChanged { .. } | BrowserEvent::SelectionSetChanged { .. }
+        ) {
+            self.schedule_child_preview();
         }
     }
 
@@ -87,6 +73,7 @@ impl ViewState {
                         self.overlay.remove_overlay(&widget);
                     }
                 }
+                self.cancel_child_preview();
                 self.truncate(0);
             }
             BrowserEvent::ColumnsTruncated { len } => {

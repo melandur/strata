@@ -149,6 +149,7 @@ impl ViewState {
         if self.yazi_columns.replace(enabled) == enabled {
             return;
         }
+        self.cancel_child_preview();
         self.browser.set_shifting_columns(enabled);
         self.sync_column_viewport();
         let deepest = self
