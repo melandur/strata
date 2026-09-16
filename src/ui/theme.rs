@@ -87,6 +87,8 @@ struct Preferences {
     folder_peeking: bool,
     #[serde(default = "default_enabled")]
     single_click_previews: bool,
+    #[serde(default)]
+    yazi_columns: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hardware_accelerated_video_previews: Option<bool>,
     #[serde(default = "default_video_preview_backend")]
@@ -182,6 +184,7 @@ impl Default for Preferences {
             theme: "tokyo-night".to_owned(),
             folder_peeking: true,
             single_click_previews: true,
+            yazi_columns: false,
             hardware_accelerated_video_previews: None,
             video_preview_backend: default_video_preview_backend(),
             search_open_files_directly: false,
@@ -401,6 +404,15 @@ impl ThemeManager {
 
     pub fn set_folder_peeking(&self, enabled: bool) {
         self.preferences.borrow_mut().folder_peeking = enabled;
+        self.save_preferences();
+    }
+
+    pub fn yazi_columns(&self) -> bool {
+        self.preferences.borrow().yazi_columns
+    }
+
+    pub fn set_yazi_columns(&self, enabled: bool) {
+        self.preferences.borrow_mut().yazi_columns = enabled;
         self.save_preferences();
     }
 

@@ -79,6 +79,12 @@ fn append_browsing_options(content: &gtk::Box, manager: &Rc<ThemeManager>) {
     let browsing = super::settings_group(content, "BROWSING");
     for switch in [
         PreferenceSwitch {
+            title: "Shift columns instead of adding",
+            description: "Keep three columns on screen and slide their contents when opening a folder, the way Yazi does, instead of appending a column for every level.",
+            read: ThemeManager::yazi_columns,
+            write: ThemeManager::set_yazi_columns,
+        },
+        PreferenceSwitch {
             title: "Folder peeking",
             description: "Preview folders automatically while moving through a pane.",
             read: ThemeManager::folder_peeking,

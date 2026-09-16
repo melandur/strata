@@ -165,6 +165,7 @@ pub(super) struct ViewState {
     peek_behavior: PeekBehavior,
     peek_enabled: Cell<bool>,
     single_click_previews: Cell<bool>,
+    yazi_columns: Cell<bool>,
     multiple_selection: Rc<Cell<bool>>,
     interactive: bool,
     columns_click_activation: Cell<ClickActivation>,
@@ -487,6 +488,7 @@ impl BrowserView {
             peek_behavior,
             peek_enabled: Cell::new(true),
             single_click_previews: Cell::new(true),
+            yazi_columns: Cell::new(false),
             multiple_selection,
             interactive,
             columns_click_activation: Cell::new(ClickActivation::default()),
@@ -664,6 +666,7 @@ impl BrowserView {
         breadcrumb_scroller.add_controller(scroll_controller);
 
         let view = Self { state };
+        view.state.track_column_viewport();
         view.bind_preferences(&preferences);
         view
     }

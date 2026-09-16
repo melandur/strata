@@ -18,6 +18,12 @@ const TARGETS: &[Target] = &[
         aliases: "startup launch home folder reset",
     },
     Target {
+        id: "shifting-columns",
+        page: "general",
+        title: "Shift columns instead of adding",
+        aliases: "browsing miller panes yazi fixed three slide ranger",
+    },
+    Target {
         id: "peeking",
         page: "general",
         title: "Folder peeking",

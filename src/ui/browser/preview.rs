@@ -42,6 +42,11 @@ impl BrowserView {
         if self.view_mode() != BrowserMode::Columns {
             return single_pane_preview_reservation(available);
         }
+        // Fixed slots re-divide whatever viewport is left, so they only claim
+        // the width they cannot compress below.
+        if self.state.yazi_columns.get() {
+            return self.state.minimum_viewport_width();
+        }
         self.state
             .columns
             .borrow()
@@ -51,6 +56,9 @@ impl BrowserView {
     }
 
     pub(in crate::ui) fn preview_navigation_width(&self, available: i32) -> i32 {
+        if self.state.yazi_columns.get() {
+            return self.state.minimum_viewport_width();
+        }
         self.state
             .focused_column_span()
             .map_or(COLUMN_WIDTH, |span| {

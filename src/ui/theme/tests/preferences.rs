@@ -13,6 +13,7 @@ fn non_default_preferences() -> Preferences {
         theme: "nord".into(),
         folder_peeking: false,
         single_click_previews: false,
+        yazi_columns: true,
         hardware_accelerated_video_previews: Some(false),
         video_preview_backend: "vulkan".into(),
         search_open_files_directly: true,

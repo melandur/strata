@@ -69,6 +69,10 @@ impl PendingPointerActivation {
 #[derive(Clone)]
 pub(super) struct ColumnView {
     pub(super) shell: gtk::Box,
+    pub(super) resize_handle: gtk::Box,
+    /// Width the column keeps outside the fixed viewport, so toggling the
+    /// preference restores a manually resized column instead of the default.
+    pub(super) manual_width: Rc<Cell<i32>>,
     pub(super) reveal_button: gtk::Button,
     pub(super) destination_hint: gtk::Label,
     pub(super) animation_generation: Rc<Cell<u64>>,
@@ -1275,12 +1279,16 @@ impl ViewState {
         });
         shell.add_controller(filter_focus);
 
+        let manual_width = Rc::new(Cell::new(COLUMN_WIDTH));
         shell.set_size_request(COLUMN_WIDTH, -1);
         let previous_scale = Cell::new(1.0);
+        let scaled_manual_width = manual_width.clone();
         crate::ui::theme::ThemeManager::shared().bind_interface_scale(
             &shell,
             move |shell, scale| {
                 let ratio = scale / previous_scale.replace(scale);
+                let scaled = (f64::from(scaled_manual_width.get()) * ratio).round() as i32;
+                scaled_manual_width.set(scaled);
                 shell.set_width_request((f64::from(shell.width_request()) * ratio).round() as i32);
             },
         );
@@ -1304,6 +1312,7 @@ impl ViewState {
         let shell_for_autofit = shell.downgrade();
         let column_for_autofit = column.downgrade();
         let resize_start_for_begin = resize_start.clone();
+        let autofit_manual_width = manual_width.clone();
         let pointer_start_for_begin = pointer_start.clone();
         let last_press_for_begin = last_press.clone();
         resize.connect_drag_begin(move |gesture, _, _| {
@@ -1321,7 +1330,9 @@ impl ViewState {
                     .upgrade()
                     .map(|column| max_child_natural_width(column.upcast_ref::<gtk::Widget>()))
                     .unwrap_or(COLUMN_WIDTH);
-                shell_for_autofit.set_size_request(max_natural.max(COLUMN_WIDTH), -1);
+                let width = max_natural.max(COLUMN_WIDTH);
+                autofit_manual_width.set(width);
+                shell_for_autofit.set_size_request(width, -1);
                 gesture.set_state(gtk::EventSequenceState::Denied);
                 return;
             }
@@ -1333,6 +1344,7 @@ impl ViewState {
             gesture.set_state(gtk::EventSequenceState::Claimed);
         });
         let shell_for_resize = shell.downgrade();
+        let drag_manual_width = manual_width.clone();
         resize.connect_drag_update(move |gesture, fallback_offset_x, _| {
             let Some(shell_for_resize) = shell_for_resize.upgrade() else {
                 return;
@@ -1345,8 +1357,9 @@ impl ViewState {
                 .get()
                 .zip(pointer_x)
                 .map_or(fallback_offset_x, |(start, current)| current - start);
-            shell_for_resize
-                .set_size_request(resized_column_width(resize_start.get(), offset_x), -1);
+            let width = resized_column_width(resize_start.get(), offset_x);
+            drag_manual_width.set(width);
+            shell_for_resize.set_size_request(width, -1);
         });
         resize_handle.add_controller(resize);
         resize_handle.set_halign(gtk::Align::End);
@@ -1382,6 +1395,8 @@ impl ViewState {
             .insert_child_after(&shell, previous.as_ref());
         self.columns.borrow_mut().push(ColumnView {
             shell: shell.clone(),
+            resize_handle: resize_handle.clone(),
+            manual_width,
             reveal_button,
             destination_hint,
             animation_generation: animation_generation.clone(),
@@ -1421,6 +1436,7 @@ impl ViewState {
             arm_column_spinner(column);
         }
         self.refresh_active_path_rows();
+        self.sync_column_viewport();
         animate_column_entry(&column, &animation_generation);
         self.reveal_column(shell);
     }
@@ -1484,6 +1500,9 @@ impl ViewState {
     }
 
     pub(super) fn reveal_column(self: &Rc<Self>, shell: gtk::Box) {
+        if self.yazi_columns.get() {
+            return;
+        }
         let animation_id = self.horizontal_scroll_generation.get().saturating_add(1);
         self.horizontal_scroll_generation.set(animation_id);
         let weak = Rc::downgrade(self);
@@ -1562,6 +1581,7 @@ impl ViewState {
             self.columns_widget.remove(&column.shell);
             self.overlay.remove_overlay(&column.marquee.band());
         }
+        self.sync_column_viewport();
         let retained = self
             .columns
             .borrow()
@@ -1576,8 +1596,10 @@ impl ViewState {
 mod reveal;
 mod rows;
 mod search;
+mod viewport;
 
 pub(super) use reveal::ColumnSpan;
+pub(in crate::ui) use viewport::VIEWPORT_SLOTS;
 
 #[cfg(test)]
 mod tests;
